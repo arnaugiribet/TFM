@@ -1,0 +1,243 @@
+---
+title: "TFM"
+format: html
+editor: source
+---
+
+## Entrega 3
+
+```{r}
+rm(list=ls())
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+
+library('dplyr')
+library('data.table')
+library('reldist')
+library("FactoMineR")
+
+load('dades/dadesNetesSenceres.RData')
+```
+
+# 1 Divisió en train validation i test
+
+Realitzem una divisió estratificada (stratified train test validation split)
+
+Reduïrem les dades d'entrenament que siguin 0 (cas no frau) en un 80% per acabar obtenint unes dades d'entrenament més útils.
+
+és molt important que mantinguem la proporció real de 0 i 1 als datasets de test i validació
+
+Per tant, cal que aquest remostreig només s'apliqui a les dades d'entrenament.
+
+-------------
+
+1. Tenim les dades originals.
+
+2. Volem acabar obtenir la partició desitjada de 70 entrenament, 15 test i 15 validació.
+
+3. També sabem que reduïrem les dades de No Frau en un 80 percent (dins de cada tram).
+
+- No podem primer reduir el 80% general (dins de cada tram), perquè llavors estaríem afectant la proporció de 0 i 1 dins del que després seria train i test.
+
+- Si primer dividim en train, test i validació (segons els 70, 15, 15), i després reduïm el 80% de train, no acabarem amb una divisió de 70, 15, 15, sinó que el número de train s'aproparà al de test i validació, que no és pas necessari.
+
+- Per tant, hem de calcular prèviament la partició inicial en train, test i validació, de manera que en aplicar la reducció del 80% de casos No Frau en les dades de train, finalment obtinguem una partició de 70, 15, 15.
+
+Queda demostrat que la funció és la següent:
+
+Ens dona la partició necessària per al dataset d'entrenament inicial, que ens assegura que, en reduïr posteriorment els casos de No Frau un cert percentatge desitjat, acabarem obtenim la partició en train, test i validació que volíem.
+
+```{r}
+##########
+library('rsample')
+
+# proporcions finals que desitgem:
+prop_train_final<-0.7 
+prop_test_final<-0.15
+prop_val_final<-1-prop_train_final-prop_test_final
+
+# mesura (proporció) en què reduïrem els casos no frau del dataset d'entrenament
+prop_reduccio0_train<-0.8
+
+# la proporció de casos de frau vs no frau els obtindrem de cada tram de renda
+
+prop_train_inicial_f<-function(prop_train_final,prop_reduccio0_train,prop_1){
+  
+  prop_mantenir0_train<-1-prop_reduccio0_train
+  prop_test_final<-1-prop_train_final
+  prop_0<-1-prop_1
+  num<-prop_train_final
+  
+  den<-(prop_mantenir0_train*prop_0+prop_1)*(prop_test_final)+prop_train_final
+  val<-num/den
+  return(val)
+}
+```
+
+Ara ja podem aplicar la funció dins de cada tram de renda i així obtenir el remostreig i divisió en train, test i validació a la vegada.
+
+```{r}
+
+dades_tmp<-data.frame()
+dadesReferencia_tmp<-data.frame()
+trams<-levels(dadesReferencia$`Tram de Renda`)
+for(tram in trams){
+  cat(tram,' ')
+  #dades corresponents al tram
+  dadesReferencia_tram<-dadesReferencia %>% 
+    filter(
+    `Tram de Renda`==tram
+  )
+  
+  #proporció de frau sobre el total - serveix per saber com es reduïrà el dataset de train
+  n_Frau1<-dadesReferencia_tram$`Frau Potencial` %>% sum
+  prop_1_tram<-n_Frau1/nrow(dadesReferencia_tram)
+  
+  #amb la funció desenvolupada al chunk anterior, càlcul de la proporció inicial de train, abans d'ésser reduïda
+  prop_train_inicial<-prop_train_inicial_f(prop_train_final,prop_reduccio0_train,prop_1_tram)
+  
+  #partició inicial en entrenament i (test+val)
+  strat_train_TestVal<-rsample::initial_split(dadesReferencia_tram,
+                                              prop=prop_train_inicial,
+                                              strata = `Frau Potencial`)
+  
+  train_tram<-rsample::training(strat_train_TestVal)
+  testVal_tram<-rsample::testing(strat_train_TestVal)
+  
+  #partició de (test+val) en test i val per separat
+  prop_test<-prop_test_final/(prop_test_final+prop_val_final)
+  strat_test_val<-rsample::initial_split(testVal_tram,
+                                         prop=prop_test,
+                                         strata = `Frau Potencial`)
+  test_tram<-rsample::training(strat_test_val)
+  val_tram<-rsample::testing(strat_test_val)
+  
+  #reducció de les dades d'entrenament
+  indexos_0_tram<-which(train_tram$`Frau Potencial`==0)
+  n_train_tram<-(length(indexos_0_tram)*prop_reduccio0_train) %>% roundup2
+  set.seed(94)
+  indexos_0_tram_eliminar<-sample(indexos_0_tram,n_train_tram)
+  train_tram<-train_tram[-indexos_0_tram_eliminar,]
+  
+  #afegim la columna de tipus de grup (entrenament, test o val)
+  train_tram$grup<-'train'
+  test_tram$grup<-'test'
+  val_tram$grup<-'val'
+  
+  #reconstrucció dadesReferència
+  dadesReferencia_tram_tmp<-train_tram %>% rbind(test_tram) %>% rbind(val_tram) %>% arrange(id)
+  dadesReferencia_tmp<-rbind(dadesReferencia_tmp,dadesReferencia_tram_tmp)
+  #reconstrucció dades
+  dades_tram_tmp<-dades %>% filter(id %in% dadesReferencia_tram_tmp$id)
+  dades_tmp<-rbind(dades_tmp,dades_tram_tmp)
+}
+dades<-dades_tmp
+dadesReferencia<-dadesReferencia_tmp
+
+rm(list=setdiff(ls(),c('dades','dadesReferencia','roundup2','taulesResultats')))
+```
+
+#taules de comprovació
+
+Aquí s'ha de comparar amb les inicials per veure que es mantenen les proporcions de frau a test i val però a train s'ha augmentat.
+
+Tmb es pot veure que les particions de 70 15 i 15 estan bé tant a nivell general com tram a tram!
+
+```{r}
+#freqüència i proporció general dades en els grups train, test i validació
+taulesResultats$`Taula General Proporció Divisió Mostra` <- 
+  dadesReferencia %>% 
+  group_by(`grup`) %>% 
+  summarize(
+    `Freqüència`=length(`Frau Potencial`),
+    `Proporció Final`=100*(`Freqüència`/nrow(dadesReferencia)) %>% roundup2(2)
+  ) %>% 
+  rename(
+    `Classe`=grup
+  )
+
+#freqüència i proporció general de frau segons grups train, test i validació
+taulesResultats$`Taula General Proporció Frau Per Divisió` <- 
+dadesReferencia %>% 
+  group_by(`grup`) %>% 
+  summarize(
+    Num1=sum(`Frau Potencial`),
+    Num0=length(`Frau Potencial`)-sum(`Frau Potencial`),
+    `Percentatge de Frau Potencial`=(100*Num1/(Num1+Num0)) %>% roundup2(2)
+  ) %>%
+  rename(
+    `Classe`=grup,
+    `Freqüència Frau Potencial`=Num1,
+    `Freqüència No Frau Potencial`=Num0
+  )
+
+#freqüència i proporció  de dades (detallat per trams) en els grups train, test i validació
+t_freq_tram<-dadesReferencia %>%
+  group_by(`Tram de Renda`) %>% 
+  summarize(
+    freq_tram=length(`Frau Potencial`)
+  )
+
+t_freq_grupTram<-dadesReferencia %>% 
+  group_by(`Tram de Renda`, grup) %>% 
+  summarize(
+    freq_grupTram=length(`Frau Potencial`)
+  )
+
+taulesResultats$`Taula Proporció Divisió de Mostra Segons Tram de Renda` <- 
+t_freq_grupTram %>% 
+  inner_join(t_freq_tram, by='Tram de Renda') %>% 
+  summarize(
+    `Classe`=grup,
+    `Freqüència`=freq_grupTram,
+    `Proporció dins del Tram`=(100*freq_grupTram/freq_tram) %>% roundup2(2)
+  )
+
+rm(t_freq_grupTram,t_freq_tram)
+
+#freqüència i proporció detallada per trams de frau segons grups train, test i validació
+taulesResultats$`Taula Proporció Frau Per Divisió Segons Tram de Renda` <- 
+dadesReferencia %>% 
+  group_by(`grup`,`Tram de Renda`) %>% 
+  summarize(
+    Num1=sum(`Frau Potencial`),
+    Num0=length(`Frau Potencial`)-sum(`Frau Potencial`),
+    `Percentatge de Frau Potencial`=(100*Num1/(Num1+Num0)) %>% roundup2(2)
+  ) %>%
+  rename(
+    `Classe`=grup,
+    `Freqüència Frau Potencial`=Num1,
+    `Freqüència No Frau Potencial`=Num0
+  ) %>% 
+  arrange(`Tram de Renda`)
+```
+
+# Revisió del dataset reduït
+
+```{r}
+#una dada constant? després de reduir la bbdd n'apareixen més!
+columnes_uniqueVals<-dades %>% sapply(function(x) length(unique(x)))
+eliminar<-names(which(columnes_uniqueVals==1))
+
+dades <- dades %>% select(-all_of(eliminar))
+
+#ens assegurem que dades$id i dadesReferencia$id són iguals, amb el mateix ordre perquè eliminiarem dades$id
+if(sum(dades$id==dadesReferencia$id)!=nrow(dades)){
+  stop("Els IDs de dades i dadesReferència no concorden")
+}
+dades<-dades %>% select(-id)
+
+rm(columnes_uniqueVals,eliminar)
+```
+
+# Normalitzem les dades
+
+```{r}
+#Transformem
+
+dades<-lapply(dades,scale) #un minut, aprox
+dades<-data.frame(dades)
+
+dades<-as.matrix(dades)
+save.image('dades/dadesReduidesDivididesNormalitzades.RData')
+```
+

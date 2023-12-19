@@ -1,0 +1,113 @@
+---
+title: "TFM"
+format: html
+editor: source
+---
+
+```{r}
+rm(list=ls())
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+options(scipen = 999)
+library('dplyr')
+library('data.table')
+library('parallel')
+library('doParallel')
+library('nnet')
+library('caret')
+
+load('dades/dadesRedDivNormProjectades.RData')
+```
+
+# Preparem Neural Net amb parallel processing
+
+```{r}
+## Preparem les dades d'entrenament
+train_indexs<-which(dadesReferencia$grup=='train')
+
+regressors<-data.frame(dadesProj)
+targets<-as.factor(dadesReferencia$`Frau Potencial`)
+
+trainData<-cbind(regressors[train_indexs,],targets[train_indexs])
+testData<-regressors[-train_indexs,]
+testY<-targets[-train_indexs]
+rm(regressors,targets,train_indexs)
+
+#Preparem el parallel processing
+# cl <- detectCores()
+# cl <- makeCluster(15)
+# registerDoParallel(cl)
+
+#Paràmetres que volem estudiar
+myGrid <- expand.grid(.decay = c(0.5, 0.1), .size = c(7,9,12))
+
+nnetParamGridSearch <-
+  train(targets ~ ., 
+        data=trainData,
+        method = "nnet",
+        verbose = T,
+        tuneGrid = myGrid,
+        trControl=trainControl(
+          allowParallel = F
+          #verboseIter =T #print amb parallel
+        ))
+
+## Tanquem el cluster de parallel processing:
+# stopCluster(cl)
+# rm(cl)
+
+#prediccions
+#prestige.predict <- predict(prestige.fit, newdata = prestige.test)
+```
+
+```{r}
+save(nnetParamGridSearch, file='dades/nnet1Results.RData')
+```
+
+```{r}
+load('dades/nnet1Results.RData')
+```
+
+```{r}
+taulesResultats$`Resultats Gridsearch`<-nnetParamGridSearch$results 
+nnetParamGridSearch$results 
+
+testPredictions <- predict(nnetParamGridSearch, newdata = testData)
+testPredictions_results<-caret::confusionMatrix(data=testPredictions,reference=testY)
+
+taulesResultats$`Resultats Test`<-data.frame(Accuracy=testPredictions_results$overall[1],
+           Kappa=testPredictions_results$overall[2],
+           row.names = NULL)
+
+taulesResultats$`Matriu de confusió`<-data.frame(testPredictions_results$table)
+
+```
+
+
+```{r}
+
+num_models<-nnetParamGridSearch$finalModel %>% length
+resultats<-list()
+for(i in 1:num_models){
+  print(i)
+  model <- nnetParamGridSearch$finalModel[[i]]
+  testPredictions <- predict(model, newdata = testData)
+  resultats[[i]]<-caret::confusionMatrix(data=testPredictions,reference=testY)
+}
+
+# Suposant que vols fer prediccions amb el tercer model (índex 3)
+
+
+
+# Fes les prediccions amb el conjunt de test
+
+```
+
+
+
+
+
+
+
+
+
+

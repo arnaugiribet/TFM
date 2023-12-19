@@ -1,0 +1,262 @@
+---
+title: "TFM"
+format: html
+editor: source
+---
+
+## Entrega 3
+
+```{r}
+rm(list=ls())
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+
+library('dplyr')
+library('data.table')
+library('reldist')
+library("FactoMineR")
+
+
+load('Muestra2020/dades2020.RData')
+dades<-dades %>% select(-IdPerceptor) #ja tenim una altra variable ID
+source('funcions/funcions.R')
+```
+
+#1. Creació de la variable objectiu
+
+```{r}
+taulesResultats<-list()
+
+#1.1. Resum del dataset
+
+taulesResultats$`Taula Resum General` <- dades %>% 
+  summarize(
+    `Mida Mostral`=length(factor),
+    `Mostra elevada`=sum(factor),
+    `Número de variables`=ncol(dades),
+  )
+
+#1.2. Creo variables
+dades<-dades %>% 
+  mutate(
+    `Renda` = Par432+Par460,
+    `Tram de Renda` = cut(Renda,c(-Inf,0,6,12,18,24,30,36,42,48,54,60,Inf)*1000*100,
+                        labels=paste('Grup ',1:12,': ',
+                        c('Fins a 0€','(0-6.000€]','(6.000-12.000€]','(12.000-18.000€]','(18.000-24.000€]',
+                          '(24.000-30.000€]','(30.000-36.000€]','(36.000-42.000€]','(42.000-48.000€]',
+                          '(48.000-54.000€]','(54.000-60.000€]','Més de 60.000€'),sep='')),
+    `Crèdits Fiscals` = Renda-Par595
+  )
+
+#1.3. Taula de crèdits fiscals per tram de bit
+taulesResultats$`Taula Crèdits Fiscals per Tram de BIT`<-dades %>% 
+  group_by(`Tram de Renda`) %>% 
+  summarize(Freqüència=length(factor),
+            `Freqüència Elevada`=sum(factor) %>% roundup2(0),
+            `Percentil 50 Crèdits Fiscals`=
+              wtd.quantile(`Crèdits Fiscals`,q=0.5,weight=factor)/100 %>% roundup2(2),
+            # `Quota Resultant Mitjana`=
+            #   weighted.mean(Par595,factor)/100 %>% roundup2(2),
+            `Percentil 95 Crèdits Fiscals`=
+              wtd.quantile(`Crèdits Fiscals`,q=0.95,weight=factor)/100 %>% roundup2(2)
+            )
+
+#1.4. Afegeixo a cada autoliquidació el percentil 95 de crèdit fiscal corresponent segons tram de bit
+dades <- dades %>% 
+  left_join(taulesResultats$`Taula Crèdits Fiscals per Tram de BIT` %>% 
+              select(`Tram de Renda`,`Percentil 95 Crèdits Fiscals`),
+            by='Tram de Renda') %>% 
+  mutate(
+    `Percentil 95 Crèdits Fiscals`=`Percentil 95 Crèdits Fiscals`*100
+  )
+
+#1.5. variable objectiu
+dades <- dades %>% 
+  mutate(
+    `Frau Potencial` = as.numeric(`Crèdits Fiscals`>`Percentil 95 Crèdits Fiscals`)
+    ) %>% 
+  select(-`Percentil 95 Crèdits Fiscals`)
+
+#1.6. taula frau potencial
+taulesResultats$`Taula Freqüències Frau Potencial`<-dades %>% 
+  group_by(`Frau Potencial`) %>% 
+  summarize(`Freqüència mostral`=length(factor) %>% roundup2(2),
+            `Freqüència elevada`=sum(factor) %>% roundup2(2),
+            `Freqüència mostral (%)`=(100*length(factor)/(nrow(dades))) %>% roundup2(2),
+            `Freqüència elevada (%)`=(100*sum(factor)/(sum(dades$factor))) %>% roundup2(2),
+            )
+
+#1.7. taula frau potencial per trams de renda
+taulesResultats$`Taula Freqüències Frau Potencial per Tram de Renda`<-dades %>% 
+  group_by(`Tram de Renda`, `Frau Potencial`, .drop = FALSE) %>% 
+  summarize(`Freqüència mostral`=length(factor) %>% roundup2(2),
+            `Freqüència elevada`=sum(factor) %>% roundup2(2),
+            `Freqüència mostral (%)`=(100*length(factor)/(nrow(dades))) %>% roundup2(2),
+            `Freqüència elevada (%)`=(100*sum(factor)/(sum(dades$factor))) %>% roundup2(2),
+            )
+```
+
+Per què no és un 5% els valors fraudulents, quan s'ha calculat fent els que superen el 95%?
+
+1) Perquè s'ha calculat el llindar en base al percentil 95 de la renda poblacional.
+2) Perquè s'ha fet un llindar per a cada un dels 12 grups de renda.
+
+Els factors d'elevació fan que el percentil 95 no sempre sigui possible de calcular exactament. Per tant en alguns trams pot ser que el tram 95% sigui igual que el 100%, o inclús que el 90%.
+
+
+#2.1 Tractament numèric previ
+
+```{r}
+#2.0 eliminem les variables que tinguin un sol valor
+
+valorsDiferents<-sapply(dades,function(x) length(unique(x)))
+dades<-dades[,-which(valorsDiferents==1)]
+
+rm(valorsDiferents)
+#2.1 normalitzar les variables regressores------
+
+#2.1.1 Per tipus (format, classe) de variable
+
+#quines variables sabem que no seran regressores:
+noRegressores<-c('id','Tram de Renda','Frau Potencial','factor')
+
+#n'estudiem el tipus per passar-les a numèriques
+dadesClasses<-dades %>% sapply(class)
+dadesClasses %>% table
+dadesClassesArreglar<-dadesClasses[dadesClasses %in% c('character','factor','logical') &
+                                     !names(dadesClasses) %in% noRegressores]
+dades[,names(dadesClassesArreglar)] %>% sapply(table)
+
+#hem d'arreglar dec
+dades <- dades %>% 
+  mutate(dec=fifelse(dec=='C',
+                     1,
+                     0))
+
+dades %>% select(-all_of(noRegressores)) %>% sapply(class) %>% table
+rm(dadesClasses,dadesClassesArreglar)
+
+#2.1.2 Per missings
+
+dadesNumMissing<-dades %>% sapply(function(x) sum(is.na(x)))
+#quin percentatge representen
+(100*dadesNumMissing[dadesNumMissing>0]/nrow(dades)) %>% roundup2(2)
+
+#veiem que tenen molts NA:
+#quants valors prenen quan no són NA
+dadesNumMissingNoms<-names(dadesNumMissing[dadesNumMissing>0])
+categoriesDiferentsTotals<-dades[,dadesNumMissingNoms] %>% sapply(function(x) length(unique(x)))
+categoriesDiferentsTotals
+
+#quantes noves columnes representarien, afegint el 0 per NA
+sum(categoriesDiferentsTotals+1)
+```
+
+Són les partides P166, P167, P168 (rendiments d'activitats econòmiques en estimació directa) i P1442 (rendiments d'activitats econòmiques en estimació objectiva).
+
+El funcionament d'aquestes és el següent: per a cada una de les 4 partides hi haurà tants subíndexs (és a dir, tantes columnes per a cada partida) com activitats econòmiques hagi omplert algun contribuent. Per aquest motiu a cada subíndex hi ha progressivament menys declarants que hi tinguin algun valor.
+
+Com que per a fer un anàlisi factorial de dades mixtes es transforma cada factor dins d'una variable categòrica en una nova columna dicotòmica, aquestes 23 columnes n'esdevindrien 2.814, que no és factible.
+
+És, per tant, coherent d'omplir els missings amb valor 0, i substiuir els valors per 1, i prosseguir amb un anàlisi de components principals com s'havia proposat inicialment.
+
+```{r}
+for(columna in dadesNumMissingNoms){
+  nas<-is.na(dades[,columna])
+  dades[nas,columna]<-0
+  dades[!nas,columna]<-1
+}
+
+#i ara ho tenim tot en zeros i uns
+rm(nas, columna, categoriesDiferentsTotals, dadesNumMissing,
+   dadesNumMissingNoms)
+
+#2.1.3 Revisem les variables identificadores de contribuent (llegint el model del BOE i les metadades)
+taulesResultats$`Taula Identificador Contribuent`<-as.data.frame(dades[,c('Par1','Par26','Par42','Par45','Par487')] %>% sapply(table))
+
+#partida 1 a dummy
+dades<-dades %>% 
+  mutate(
+    Par1_2=fifelse(Par1==2,
+                   1,
+                   0),
+    Par1_5=fifelse(Par1==5,
+                   1,
+                   0),
+    Par1_6=fifelse(Par1==6,
+                   1,
+                   0),
+    Par1_9=fifelse(Par1==9,
+                   1,
+                   0),
+    Par1_11=fifelse(Par1==11,
+                   1,
+                   0),
+    Par1_14=fifelse(Par1==14,
+                   1,
+                   0),
+    Par1_17=fifelse(Par1==17,
+                   1,
+                   0),
+    Par1_20=fifelse(Par1==20,
+                   1,
+                   0),
+    Par1_24=fifelse(Par1==24,
+                   1,
+                   0),
+    Par1_27=fifelse(Par1==27,
+                   1,
+                   0),
+  )  %>% 
+  select(-all_of(c('Par1','Par26','Par42','Par45','Par487')))
+
+
+##2.1.4 Any de naixement del cònjuge
+#quan és 0 hi imputaré la mediana (sense zeros)
+mediana<-dades$EjnacC[dades$EjnacC!=0] %>% median %>% roundup2(0)
+dades <- dades %>% 
+  mutate(EjnacC=fifelse(EjnacC==0,
+                        mediana,
+                        EjnacC))
+rm(mediana)
+
+#2.1.5 Elimino les variables codi postal, província, municipi i comunitat autònoma
+dades<-dades %>% 
+  select(-cdpost,-prov,-muni,-ca)
+
+#2.1.6 Comprovo les variables PXXX, que normaliment corresponen a codis identificadors
+
+partidesPX<-grepl("P[0-9]", colnames(dades))
+partidesPX<-colnames(dades)[partidesPX]
+
+partidesPXTransformar<-sapply(dades[,partidesPX],function(x) length(unique(x)))
+partidesPXTransformar<-partidesPXTransformar[partidesPXTransformar>2 & partidesPXTransformar<20]
+sapply(dades[,names(partidesPXTransformar)],table)
+
+#com que són codis, les arreglem. 0 o 1s per no perdre la dada de si està informada o no
+for(col in names(partidesPXTransformar)){
+  dades[,col]<-fifelse(dades[,col]!=0,
+                       1,
+                       0)
+}
+
+rm(partidesPX,partidesPXTransformar, col)
+#Estan totes bé?
+dades[,1:30] %>% str
+```
+
+I ja hem tractades totes les variables que utilitzarem.
+
+```{r}
+#filtrem les que volem no utilitzar
+dadesReferencia<-dades %>% 
+  select(all_of(noRegressores))
+
+noRegressores<-noRegressores[noRegressores!='id']
+dades<-dades %>% select(-any_of(c(noRegressores,'Renda','Crèdits Fiscals')))
+
+rm(noRegressores)
+save.image('dades/dadesNetesSenceres.RData')
+```
+
+
+

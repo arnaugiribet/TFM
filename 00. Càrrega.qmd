@@ -1,0 +1,40 @@
+---
+title: "TFM"
+format: html
+editor: source
+---
+
+## Entrega 3
+
+#Càrrega i depuració de dades
+
+```{r}
+rm(list=ls())
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+
+library('readr')
+library('openxlsx')
+library('dplyr')
+library('data.table')
+
+#2020
+dir<-'Muestra2020'
+
+dades_file<-paste(dir,'MuestraIRPF_2020.txt',sep='/')
+dades <- fread(dades_file, header = T, integer64 = 'numeric') %>% tibble
+
+#arreglem els integer64, que la funció no transforma bé
+integer64fix<-which(sapply(dades,class)=='integer64')
+
+for(j in integer64fix){
+  print(colnames(dades)[j]) #veure progrés
+  dades <- dades %>% mutate_at(j, as.numeric)
+}
+
+save(dades,file=paste(dir,'dades2020.RData',sep='/'))
+```
+
+
+
+
+

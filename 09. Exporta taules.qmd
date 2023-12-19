@@ -1,0 +1,85 @@
+---
+title: "exporta taules"
+format: html
+editor: visual
+---
+
+```{r}
+rm(list=ls())
+library('stargazer')
+load("D:/47932295L/OneDrive - Generalitat de Catalunya/Curs R/PAC3 TFM/dades/taulaProporcioperTramIClasse.RData")
+load("D:/47932295L/OneDrive - Generalitat de Catalunya/Curs R/PAC3 TFM/dades/dadesRedDivNormProjectades.RData")
+```
+
+```{r}
+
+#taulesResultats$`Taula Proporció Dins Del Tram Segons Classe`<-taula
+for(i in 1:length(taulesResultats)){
+  nom_taula<-names(taulesResultats)[i]
+  
+  if(nom_taula!='PCA'){
+    cat('%',nom_taula,'\n')
+ 
+  taula_stargazer<-data.frame(taulesResultats[[i]], check.names = F)
+  
+  latex_table <- stargazer(
+    taula_stargazer,
+    rownames=F,
+    title = nom_taula,
+    column.sep.width='1pt',
+    digits=3,
+    label = paste('tab:',gsub(' ','-',nom_taula),sep=''),
+    summary = FALSE,  # Don't include summary statistics
+    align = TRUE     # Align columns
+    # omit = "Residuals",  # Exclude the Residuals column
+    # omit.labels = "Residuals"
+    )
+  cat('%',rep('\n',2))
+  }
+  
+}
+
+
+
+
+
+```
+
+```{r}
+df<-data.frame(taula,check.names=F)
+nom_taula<-'Proporció'
+latex_table <- stargazer(
+    df,
+    rownames=T,
+    title = nom_taula,
+    column.sep.width='1pt',
+    digits=2,
+    label = paste('tab:',gsub(' ','-',nom_taula),sep=''),
+    summary = FALSE,  # Don't include summary statistics
+    align = TRUE     # Align columns
+    # omit = "Residuals",  # Exclude the Residuals column
+    # omit.labels = "Residuals"
+    )
+
+cat(latex_table)
+```
+
+```{r}
+df<-dadesCOR[200:205,200:205]
+nom_taula<-'Correlacions Partides 528 a 533'
+latex_table <- stargazer(
+    df,
+    rownames=T,
+    title = nom_taula,
+    column.sep.width='1pt',
+    digits=2,
+    label = paste('tab:',gsub(' ','-',nom_taula),sep=''),
+    summary = FALSE,  # Don't include summary statistics
+    align = TRUE     # Align columns
+    # omit = "Residuals",  # Exclude the Residuals column
+    # omit.labels = "Residuals"
+    )
+
+cat(latex_table)
+```
+

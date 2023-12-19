@@ -1,0 +1,106 @@
+---
+title: "TFM"
+format: html
+editor: source
+---
+
+```{r}
+rm(list=ls())
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+options(scipen = 999)
+library('dplyr')
+library('data.table')
+library("FactoMineR")
+
+load('dades/dadesReduidesDivididesNormalitzades.RData')
+```
+
+#2.4 Covariància manualment
+
+```{r}
+numRow<-nrow(dades)
+splitSize<-10000
+steps<-ceiling(numRow/splitSize)
+
+dadesCrossProd<-0
+for(i in 1:steps){
+  #informa del % de progrés
+  cat((100*i*splitSize/numRow) %>% roundup2(1),'% ',sep='')
+  #calcula quines dades agafem
+  rang_min<-1+splitSize*(i-1)
+  rang_max<-splitSize+splitSize*(i-1)
+  rang<-c(rang_min:min(rang_max,numRow))
+  #crossproduct i l'acumulo
+  dades_i<-dades[rang,]
+  dadesCrossProd<-dadesCrossProd+crossprod(dades_i)
+}
+dadesCOV<-dadesCrossProd/(numRow-1)
+rm(dadesCrossProd, dades_i, i, numRow, rang, rang_max,rang_min,splitSize,steps)
+#matriu de correlacions
+dadesCOR<-cov2cor(dadesCOV)
+
+save(dadesCOV,dadesCOR,file='dades/CovCorDadesRedDivNorm.RData')
+```
+
+#Preselecció de variables a les matrius
+
+```{r}
+load('dades/CovCorDadesRedDivNorm.RData')
+
+#elimino les variables de detall autonòmiques
+auton<-c('PAR850','PAR851','PAR852','PAR853','PAR854','PAR855','PAR856','PAR857','PAR858','PAR860','PAR862','PAR863','PAR864','PAR849','PAR865','PAR866','PAR867','PAR868','PAR869','PAR870','PAR871','PAR872','PAR873','PAR874','PAR875','PAR876','PAR877','PAR878','PAR879','PAR880','PAR881','PAR882','PAR883','PAR884','PAR885','PAR886','PAR887','PAR888','PAR889','PAR890','PAR891','PAR892','PAR893','PAR894','PAR895','PAR896','PAR803','PAR812','PAR813','PAR822','PAR897','PAR898','PAR899','PAR900','PAR901','PAR902','PAR903','PAR904','PAR905','PAR906','PAR907','PAR908','PAR909','PAR910','PAR913','PAR914','PAR915','PAR771','PAR916','PAR917','PAR918','PAR919','PAR920','PAR921','PAR922','PAR923','PAR924','PAR925','PAR926','PAR927','PAR928','PAR933','PAR934','PAR935','PAR936','PAR937','PAR938','PAR939','PAR940','PAR941','PAR942','PAR944','PAR945','PAR946','PAR947','PAR948','PAR950','PAR951','PAR952','PAR953','PAR954','PAR772','PAR774','PAR775','PAR818','PAR819','PAR820','PAR821','PAR823','PAR955','PAR956','PAR957','PAR958','PAR959','PAR960','PAR961','PAR962','PAR963','PAR964','PAR965','PAR966','PAR967','PAR968','PAR763','PAR969','PAR970','PAR971','PAR972','PAR973','PAR974','PAR799','PAR975','PAR976','PAR978','PAR979','PAR980','PAR981','PAR982','PAR983','PAR984','PAR985','PAR986','PAR987','PAR988','PAR990','PAR991','PAR992','PAR994','PAR995','PAR996','PAR997','PAR998','PAR999','PAR1000','PAR1001','PAR1002','PAR1003','PAR1004','PAR1005','PAR1006','PAR1007','PAR1008','PAR824','PAR1009','PAR1010','PAR1011','PAR1012','PAR1013','PAR1014','PAR1015','PAR1016','PAR1017','PAR1018','PAR1019','PAR1020','PAR1021','PAR1022','PAR1023','PAR1024','PAR1025','PAR1026','PAR1027','PAR1028','PAR1029','PAR1030','PAR1031','PAR1032','PAR1034','PAR1035','PAR1036','PAR1037','PAR825','PAR828','PAR1038','PAR1039','PAR1040','PAR1041','PAR1042','PAR1043','PAR1044','PAR1045','PAR1046','PAR1047','PAR1048','PAR1049','PAR1050','PAR1051','PAR1052','PAR1053','PAR1054','PAR1055','PAR1056','PAR1057','PAR1058','PAR1059','PAR1060','PAR1073','PAR1157','PAR1158','PAR1161','PAR1074','PAR1061','PAR1062','PAR1063','PAR1065','PAR1066','PAR1068','PAR1069','PAR1072','PAR1163','PAR1075','PAR1077','PAR1079','PAR1080','PAR1081','PAR1165','PAR1166','PAR1167','PAR1082','PAR1083','PAR1084','PAR1085','PAR1086','PAR1087','PAR1088','PAR1089','PAR1090','PAR1091','PAR1092','PAR1093','PAR1094','PAR1095','PAR1097','PAR1111','PAR1099','PAR1100','PAR1101','PAR1102','PAR1103','PAR1104','PAR1105','PAR1106','PAR1108','PAR1110','PAR1112','PAR1113','PAR1114','PAR1115','PAR1078','PAR1116','PAR1117','PAR1118','PAR1119','PAR1120','PAR1169','PAR1171','PAR1172','PAR1173','PAR1121')
+
+#identificadors i epígrafs IAE
+mantenim<-c('P75','P69','P63','P57','P51','P45')
+partidesPX<-grepl("P[0-9]", colnames(dadesCOR))
+partidesPX<-colnames(dades)[partidesPX]
+eliminem<-c('id',partidesPX,auton)
+
+keep<-which(!colnames(dadesCOR) %in% eliminem) #índexos
+
+#les treiem del dataset i de les matrius de Cov i Cor
+dadesCOV<-dadesCOR[keep,keep]
+dadesCOR<-dadesCOR[keep,keep]
+dades<-dades[,keep]
+
+#eigenvalues: variància explicada
+eigenValues<-eigen(dadesCOR)$values
+eigenVectors<-eigen(dadesCOR)$vector
+VarExplicada<-(100*eigenValues/sum(eigenValues))
+VarExplicadaAcum<-cumsum(VarExplicada) %>% roundup2(2)
+VarExplicada<-VarExplicada %>% roundup2(2)
+
+
+png(filename = "figs/variance_explained.png", width = 800, height = 400)
+plot(VarExplicada, type = "b", pch = 16, xlab = "principal components", 
+    ylab = "variance explained")
+dev.off()
+
+png(filename = "figs/variance_explained_acum.png", width = 800, height = 400)
+plot(VarExplicadaAcum, type = "b", pch = 16, xlab = "principal components",  ylab = "variance explained")
+dev.off()
+
+
+```
+
+```{r}
+numComponents<-which(VarExplicadaAcum>=80)[1]
+featureVector<-eigenVectors[,1:numComponents]
+
+dadesProj <- dades %*% featureVector
+
+
+
+taulesResultats$PCA<-list(eigenValues,eigenVectors,featureVector,VarExplicada,VarExplicadaAcum)
+taulesResultats$`Matriu de Correlació (10 cols) de les Dades Projectades amb PCA (arr. 5 decimals)`<- 
+  cor(dadesProj[,1:10]) %>% roundup2(5)
+rm(dades,dadesCOR,dadesCOV,eigenValues,eigenVectors,featureVector,VarExplicada,VarExplicadaAcum,
+   auton,eliminem,keep,mantenim,numComponents,partidesPX)
+
+dadesProj<-data.frame(dadesProj)
+colnames(dadesProj)<-paste('PC',1:ncol(dadesProj),sep='')
+save.image('dades/dadesRedDivNormProjectades.RData')
+```
+
+
+
