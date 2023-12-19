@@ -14,4 +14,4 @@ Actualment confidencials.
 
 ## Autor
 
-ex. [Arnau Giribet](https://www.linkedin.com/in/arnau-giribet/)
+[Arnau Giribet March](https://www.linkedin.com/in/arnau-giribet/)
